@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "220819227684",
+    "firebase_url": "https://colectivosapp-94939-default-rtdb.firebaseio.com",
+    "project_id": "colectivosapp-94939",
+    "storage_bucket": "colectivosapp-94939.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:220819227684:android:cc4c91df2c6fe54bc544b1",
+        "android_client_info": {
+          "package_name": "com.nmp.BusNow"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "YOUR_API_KEY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

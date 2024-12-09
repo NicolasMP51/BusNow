@@ -1,0 +1,17 @@
+<resources>
+    <string name="app_name">BusNow</string>
+    <string name="busca_aqui">Busca aqui</string>
+    <string name="options">options</string>
+    <string name="colectivos">COLECTIVOS</string>
+    <string name="home">Casa</string>
+    <string name="more">Más</string>
+    <string name="work">Trabajo</string>
+    <string name="recientes">Recientes</string>
+    <string name="rutas_sugeridas">Rutas Sugeridas</string>
+    <string name="origin">Origen</string>
+    <string name="google_maps_key">YOUR_API_KEY</string>
+    <string name="sugerencias">Sugerencias</string>
+    <string name="indicaciones">Indicaciones</string>
+    <string name="destination">Destino</string>
+    <string name="confirm">Confirmar ruta</string>
+</resources>
