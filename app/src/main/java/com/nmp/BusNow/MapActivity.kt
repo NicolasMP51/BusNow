@@ -40,10 +40,11 @@ import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.database.ValueEventListener
 import com.nmp.BusNow.classes.Colectivo
 import com.nmp.BusNow.classes.Funciones
-import com.nmp.BusNow.classes.Recorrido
 import com.nmp.BusNow.classes.Tandil
-import java.io.IOException
-import java.util.Locale
+import com.android.volley.Request
+import com.android.volley.toolbox.JsonObjectRequest
+import com.android.volley.toolbox.Volley
+import org.json.JSONObject
 
 class MapActivity : AppCompatActivity(), OnMapReadyCallback {
 
@@ -133,6 +134,8 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback {
 
         // Inicializa Firebase Database
         database = FirebaseDatabase.getInstance().reference
+
+        // Obtiene todos los datos de los recorridos (inicializa el object "recorridos")
         getRecorridos()
 
         // Inicializa boton para informar que subio o bajo del colectivo
@@ -270,20 +273,20 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback {
                 when (menuItem.itemId) {
                     R.id.option_1 -> {
                         // Acción para la opción 1
-                        val intent = Intent(this,ChoiceActivity::class.java)
-                        startActivity(intent)
+                        predictRoute(500, "bus1")
                         true
                     }
                     R.id.option_2 -> {
                         // Acción para la opción 2
-                        val intent = Intent(this,TracingActivity::class.java)
+                        val intent = Intent(this,PredictActivity::class.java).apply {
+                            putExtra("linea", 500)
+                            putExtra("bus_id", "bus1")
+                        }
                         startActivity(intent)
                         true
                     }
                     R.id.option_3 -> {
                         // Acción para la opción 3
-                        val intent = Intent(this,MapActivity::class.java)
-                        startActivity(intent)
                         true
                     }
                     else -> false
@@ -357,48 +360,75 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback {
     }
 
     private fun getRecorridos() {
-        database.child("recorridos2").addValueEventListener(object : ValueEventListener {
-            override fun onDataChange(snapshot: DataSnapshot) {
-                if (snapshot.exists()) {
-                    for (recorridoSnapshot in snapshot.children) {
-                        val recorrido = recorridoSnapshot.getValue(Recorrido::class.java)
-                        recorrido?.let {
-                            // Dibuja el recorrido en el mapa
-                            val color: Int = when(it.color){
-                                "Azul"-> Color.BLUE
-                                "Amarillo"-> Color.YELLOW
-                                "Blanco"-> Color.DKGRAY
-                                "Rojo"-> Color.RED
-                                "Verde"-> Color.GREEN
-                                else-> -7650029 // Marrón
-                            }
-                            var latLng: LatLng
-                            val listParadas: MutableList<LatLng> = mutableListOf()
-                            for (parada in it.paradas) {
-                                latLng = LatLng(parada[0], parada[1])
-                                listParadas.add(latLng)
-                            }
-                            recorridos[it.linea] = Colectivo(drawRoute(it.puntos,color),listParadas,color)
-                        }
-                    }
-                }
-            }
+        val url = "http://10.0.2.2:8000/get_recorridos"
 
-            override fun onCancelled(error: DatabaseError) {
-                Log.w("MainActivity", "loadPost:onCancelled", error.toException())
+        val request = JsonObjectRequest(
+            Request.Method.GET, url, null,
+            { response ->
+                // Manejo de la respuesta del servidor
+                if (response.has("error")) {
+                    val errorMessage = response.getString("error")
+                    Log.e("print", "Error del servidor: $errorMessage")
+                } else if (response.has("recorridos")) {
+                    val recorridosArray = response.getJSONArray("recorridos")
+                    for (i in 0 until recorridosArray.length()) {
+                        val recorrido = recorridosArray.getJSONObject(i)
+                        val linea = recorrido.getLong("linea")
+                        val color = recorrido.getString("color")
+                        val paradas = recorrido.getJSONArray("paradas")
+                        val puntos = recorrido.getJSONArray("puntos")
+
+                        // Procesar los datos del recorrido
+                        val colorInt: Int = when (color) {
+                            "Azul" -> Color.BLUE
+                            "Amarillo" -> Color.YELLOW
+                            "Blanco" -> Color.DKGRAY
+                            "Rojo" -> Color.RED
+                            "Verde" -> Color.GREEN
+                            else -> -7650029  // Marrón
+                        }
+
+                        val listParadas: MutableList<LatLng> = mutableListOf()
+                        for (j in 0 until paradas.length()) {
+                            val parada = paradas.getJSONArray(j)
+                            val lat = parada.getDouble(0)
+                            val lng = parada.getDouble(1)
+                            listParadas.add(LatLng(lat, lng))
+                        }
+
+                        val listPuntos: MutableList<LatLng> = mutableListOf()
+                        for (j in 0 until puntos.length()) {
+                            val punto = puntos.getJSONArray(j)
+                            val lat = punto.getDouble(0)
+                            val lng = punto.getDouble(1)
+                            listPuntos.add(LatLng(lat, lng))
+                        }
+
+                        // Guardar los datos procesados
+                        recorridos[linea] = Colectivo(drawRoute(listPuntos, colorInt), listParadas, colorInt)
+                    }
+                } else {
+                    Log.e("print", "Respuesta inesperada del servidor")
+                }
+            },
+            { error ->
+                Log.e("MainActivity", "Error en la solicitud: ${error.message}")
             }
-        })
+        )
+
+        // Agregar la solicitud a la cola
+        val queue = Volley.newRequestQueue(this)
+        queue.add(request)
     }
 
-    private fun drawRoute(puntos: List<List<Double>>, color: Int): PolylineOptions {
+    private fun drawRoute(puntos: MutableList<LatLng>, color: Int): PolylineOptions {
         val path = PolylineOptions()
             .width(8f)
             .color(color)
 
         // Agrega los puntos al Polyline
         for (punto in puntos) {
-            val latLng = LatLng(punto[0], punto[1]) // [lat, lon]
-            path.add(latLng)
+            path.add(punto)
         }
 
         return path
@@ -409,7 +439,7 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback {
         ubicacionListener?.let { database.child("ubicaciones").child(lineaAnterior).removeEventListener(it) }
 
         // Limpiar los marcadores existentes si cambia la línea
-        for ((busId, marker) in colectivoMarkers) {
+        for (marker in colectivoMarkers.values) {
             marker.remove() // Remueve el marcador del mapa
         }
         colectivoMarkers.clear() // Limpiar el mapa de marcadores antiguos
@@ -455,5 +485,52 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback {
 
         // Añadir el listener a la referencia de la base de datos
         database.child("ubicaciones").child(linea).addValueEventListener(ubicacionListener!!)
+    }
+
+    private fun predictRoute(linea: Int, id: String) {
+        val url = "http://10.0.2.2:8000/predict"
+
+        // Crear el objeto JSON para enviar
+        val jsonBody = JSONObject()
+        jsonBody.put("linea", linea)
+        jsonBody.put("id", id)
+
+        Log.i("print",jsonBody.toString())
+
+        val request = JsonObjectRequest(
+            Request.Method.POST, url, jsonBody,
+            { response ->
+                try {
+                    if (response.has("error")) {
+                        val errorMessage = response.getString("error")
+                        Log.e("print", "Error del servidor: $errorMessage")
+                    } else if (response.has("prediction")) {
+                        val coordinatesArray = response.getJSONArray("prediction")
+                        val coordinatesList = mutableListOf<Pair<Double, Double>>()
+
+                        for (i in 0 until coordinatesArray.length()) {
+                            val coord = coordinatesArray.getJSONArray(i)
+                            val lat = coord.getDouble(0)
+                            val lng = coord.getDouble(1)
+                            coordinatesList.add(Pair(lat, lng))
+                        }
+
+                        Log.i("print", "Coordenadas recibidas: $coordinatesList")
+                    } else {
+                        Log.e("print", "Respuesta inesperada del servidor")
+                    }
+
+                } catch (e: Exception) {
+                    Log.e("print", "Error procesando la respuesta: ${e.message}")
+                }
+            },
+            { error ->
+                Log.e("print", "Error: ${error.message}")
+            }
+        )
+
+        // Agregar la solicitud a la cola
+        val queue = Volley.newRequestQueue(this)
+        queue.add(request)
     }
 }

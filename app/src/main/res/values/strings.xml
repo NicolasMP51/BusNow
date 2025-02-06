@@ -14,4 +14,5 @@
     <string name="indicaciones">Indicaciones</string>
     <string name="destination">Destino</string>
     <string name="confirm">Confirmar ruta</string>
+    <string name="tiempo_estimado">Tiempo estimado a la parada:</string>
 </resources>

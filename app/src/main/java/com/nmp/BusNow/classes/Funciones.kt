@@ -20,6 +20,9 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.android.volley.Request
+import com.android.volley.toolbox.JsonObjectRequest
+import com.android.volley.toolbox.Volley
 import com.google.android.gms.common.api.ApiException
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationCallback
@@ -38,11 +41,9 @@ import com.google.android.libraries.places.api.model.AutocompleteSessionToken
 import com.google.android.libraries.places.api.net.FetchPlaceRequest
 import com.google.android.libraries.places.api.net.FindAutocompletePredictionsRequest
 import com.google.android.libraries.places.api.net.PlacesClient
-import com.google.firebase.database.DatabaseReference
-import com.google.firebase.database.FirebaseDatabase
-import com.google.maps.android.SphericalUtil
 import com.nmp.BusNow.MapActivity
 import com.nmp.BusNow.R
+import org.json.JSONObject
 import java.io.IOException
 import java.util.Locale
 import kotlin.math.*
@@ -57,7 +58,6 @@ class Funciones {
         private var selectedBus: Long = 0L
         private var locationCallback: LocationCallback? = null
         private lateinit var fusedLocationClient: FusedLocationProviderClient
-        private lateinit var database: DatabaseReference
 
         fun searchListener(editTextSearch: EditText, suggestionsContainer: CardView, cardContainer: ConstraintLayout,
                            placesClient: PlacesClient, rvSugerencias: RecyclerView, context: Context,
@@ -146,7 +146,6 @@ class Funciones {
         }
 
         fun seguimientoListener(btnSeguimiento: TextView, context: Context) {
-            database = FirebaseDatabase.getInstance().reference
             fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
             btnSeguimiento.setOnClickListener {
                 if(selectedBus != 0L) {
@@ -196,7 +195,7 @@ class Funciones {
                         // Verificar si la ubicación está dentro del recorrido del colectivo
                         if (MapActivity.recorridos[selectedBus]?.getRecorrido()?.let { isLocationInPolyline(LatLng(latitude, longitude), it) } == true) {
                             // Chequear si hay un bus cerca y actualizar su ubicacion
-                            updateBusLocation(latitude, longitude)
+                            updateBusLocation(latitude, longitude, context)
                         } else {
                             // La ubicación no está en el recorrido
                             Log.i("print", "Ubicación fuera del recorrido")
@@ -222,60 +221,52 @@ class Funciones {
             locationCallback = null
         }
 
-        private fun updateLocationToFirebase(busId: String, latitude: Double, longitude: Double) {
-            val busLocation = mapOf(
-                busId to mapOf(
-                    "lat" to latitude,
-                    "lon" to longitude
-                )
-            )
-            database.child("ubicaciones").child(selectedBus.toString()).updateChildren(busLocation)
-        }
-
         private fun isLocationInPolyline(location: LatLng, polyline: PolylineOptions): Boolean {
             val index = encontrarSegmentoMasCercano(location,polyline.points)
             val distance = distanciaASegmento(location,polyline.points[index],polyline.points[index+1])
 
             // Verificar si la ubicación está en el recorrido con una tolerancia de 20 metros
-            return (distance<20)
+            return (distance<2000)
         }
 
-        private fun updateBusLocation(latitude: Double, longitude: Double) {
-            val currentLocation = LatLng(latitude, longitude)
-            var nearbyBusId = ""
-            var minDistance = Double.MAX_VALUE
+        private fun updateBusLocation(latitude: Double, longitude: Double, context: Context) {
+            val url = "http://10.0.2.2:8000/update_bus_location"
 
-            // Obtener las ubicaciones de los buses desde Firebase
-            database.child("ubicaciones").child(selectedBus.toString()).get().addOnSuccessListener { snapshot ->
+            // Crear el objeto JSON para enviar
+            val jsonBody = JSONObject()
+            jsonBody.put("linea", segBus)
+            jsonBody.put("lat", latitude)
+            jsonBody.put("long", longitude)
 
-                // Iterar sobre los buses existentes y verificar si alguno está en el rango de 100 metros
-                snapshot.children.forEach { busSnapshot ->
-                    val busId = busSnapshot.key ?: return@forEach
-                    val busLat = busSnapshot.child("lat").getValue(Double::class.java) ?: return@forEach
-                    val busLon = busSnapshot.child("lon").getValue(Double::class.java) ?: return@forEach
-                    val busLocation = LatLng(busLat, busLon)
+            val request = JsonObjectRequest(
+                Request.Method.POST, url, jsonBody,
+                { response ->
+                    try {
+                         if (response.has("status") and response.has("bus_id")) {
+                            val status = response.getString("status")
+                            val busId = response.getString("bus_id")
 
-                    // Calcular la distancia entre el usuario y el bus
-                    val distance = SphericalUtil.computeDistanceBetween(currentLocation, busLocation)
+                            Log.i("print", "Respuesta del servidor: $status, Bus ID: $busId")
 
-                    // Si la distancia es menor, tomar el busId
-                    if (distance < minDistance) {
-                        minDistance = distance
-                        nearbyBusId = busId
-                        return@forEach
+                            // Puedes mostrar un mensaje al usuario o actualizar algún estado en la UI
+                            Toast.makeText(context, "Bus actualizado: $busId", Toast.LENGTH_SHORT).show()
+
+                        } else {
+                            Log.e("print", "Respuesta inesperada del servidor")
+                        }
+
+                    } catch (e: Exception) {
+                        Log.e("print", "Error al procesar la respuesta: ${e.message}")
                     }
+                },
+                { error ->
+                    Log.e("print", "Error: ${error.message}")
                 }
+            )
 
-                // Si se encontró un bus cerca, actualizar su ubicación, si no, crear uno nuevo
-                if (minDistance < 100) {
-                    // Llamar a la función para actualizar la ubicación del bus en la base de datos
-                    updateLocationToFirebase(nearbyBusId, latitude, longitude)
-                } else {
-                    val newBusId = "bus" + (snapshot.childrenCount + 1)
-                    // Llamar a la función para actualizar la ubicación del bus en la base de datos
-                    updateLocationToFirebase(newBusId, latitude, longitude)
-                }
-            }
+            // Agregar la solicitud a la cola
+            val queue = Volley.newRequestQueue(context)
+            queue.add(request)
         }
 
 
@@ -349,7 +340,7 @@ class Funciones {
         }
 
         fun calcDistance(start: LatLng, end: LatLng): Double {
-            var vectorRef = Tandil.vectorMarconi()
+            val vectorRef = Tandil.vectorMarconi()
             val vector = calculateMovementVector(start,end)
 
             // Calcular angulo y asegurarse de que esté en el rango [0, 2π)

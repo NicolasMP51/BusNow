@@ -39,6 +39,7 @@ android {
     }
     buildFeatures {
         compose = true
+        viewBinding = true
     }
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.1"
@@ -51,6 +52,7 @@ android {
 }
 
 dependencies {
+    implementation(libs.volley)
 
     implementation(libs.play.services.maps)
     implementation(libs.play.services.location)
