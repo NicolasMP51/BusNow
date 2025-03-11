@@ -3,7 +3,6 @@ package com.nmp.BusNow.classes
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 
 class rvAdapter<T: rvViewHolder>(private val list: List<String>, private val item: Int, private val listener: OnItemClickListener, private val vhConstructor: (View) -> T): RecyclerView.Adapter<T>() {

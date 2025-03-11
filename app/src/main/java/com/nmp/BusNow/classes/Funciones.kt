@@ -37,12 +37,18 @@ import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
+import com.google.android.gms.maps.model.BitmapDescriptorFactory
 import com.google.android.libraries.places.api.model.AutocompleteSessionToken
 import com.google.android.libraries.places.api.net.FetchPlaceRequest
 import com.google.android.libraries.places.api.net.FindAutocompletePredictionsRequest
 import com.google.android.libraries.places.api.net.PlacesClient
+import com.nmp.BusNow.ChoiceActivity
+import com.nmp.BusNow.ChoiceActivity.Companion.rutaSeleccionada
 import com.nmp.BusNow.MapActivity
+import com.nmp.BusNow.MapActivity.Companion.recorridos
+import com.nmp.BusNow.PredictActivity
 import com.nmp.BusNow.R
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
 import java.util.Locale
@@ -328,7 +334,7 @@ class Funciones {
             mMap.addCircle(
                 CircleOptions()
                     .center(origin)
-                    .radius(20.0) // Ajusta el radio según sea necesario
+                    .radius(30.0) // Ajusta el radio según sea necesario
                     .strokeColor(Color.WHITE)
                     .strokeWidth(2F)
                     .fillColor(Color.BLUE) // Color del círculo
@@ -337,6 +343,21 @@ class Funciones {
             val boundsBuilder = LatLngBounds.builder().include(origin).include(destination)
             val bounds = boundsBuilder.build()
             mMap.moveCamera(CameraUpdateFactory.newLatLngBounds(bounds, 300))
+            if (rutaSeleccionada.getLinea() != "Caminando") {
+                val color = MapActivity.recorridos[rutaSeleccionada.getLinea().toLong()]!!.getColor()
+                for (latLng in rutaSeleccionada.getParadas()) {
+                    mMap.addCircle(
+                        CircleOptions()
+                            .center(latLng)
+                            .radius(15.0) // Ajusta el radio según sea necesario
+                            .strokeColor(color)
+                            .strokeWidth(2F)
+                            .fillColor(Color.WHITE) // Color del círculo
+                    )
+                }
+                for (p in ChoiceActivity.walkingList[rutaSeleccionada.getLinea()]!!)
+                    mMap.addPolyline(p)
+            }
         }
 
         fun calcDistance(start: LatLng, end: LatLng): Double {
@@ -430,6 +451,29 @@ class Funciones {
                     { it } // Ordena alfabéticamente
                 )
             )
+        }
+
+        fun getVector(index: Int, linea: Long): JSONArray {
+            var index1 = index
+            if (index == -1) {
+                index1 = recorridos[linea]!!.getRecorrido().points.size-1
+            } else if (index == recorridos[linea]!!.getRecorrido().points.size) {
+                index1 = 0
+            }
+            val index2 = if (index1 == recorridos[linea]!!.getRecorrido().points.size-1) {
+                0
+            } else {
+                index1 + 1
+            }
+            val punto1 = recorridos[linea]!!.getRecorrido().points[index1]
+            val punto2 = recorridos[linea]!!.getRecorrido().points[index2]
+            val lat1 = punto1.latitude
+            val lng1 = punto1.longitude
+            val lat2 = punto2.latitude
+            val lng2 = punto2.longitude
+            val x = lat2 - lat1
+            val y = lng2 - lng1
+            return JSONArray().put(x).put(y)
         }
     }
 }

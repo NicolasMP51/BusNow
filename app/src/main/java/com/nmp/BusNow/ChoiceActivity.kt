@@ -25,11 +25,15 @@ import com.google.android.gms.maps.GoogleMap
 import com.google.android.gms.maps.OnMapReadyCallback
 import com.google.android.gms.maps.SupportMapFragment
 import com.google.android.gms.maps.model.CircleOptions
+import com.google.android.gms.maps.model.Dash
+import com.google.android.gms.maps.model.Gap
 import com.google.android.gms.maps.model.LatLng
+import com.google.android.gms.maps.model.PatternItem
 import com.google.android.gms.maps.model.PolylineOptions
 import com.google.android.libraries.places.api.Places
 import com.google.android.libraries.places.api.net.PlacesClient
 import com.google.maps.android.PolyUtil
+import com.nmp.BusNow.classes.Colectivo
 import com.nmp.BusNow.classes.Funciones
 import com.nmp.BusNow.classes.Grafo
 import com.nmp.BusNow.classes.Parada
@@ -44,6 +48,7 @@ class ChoiceActivity : AppCompatActivity(), OnMapReadyCallback {
     companion object {
         val rutasList = mutableMapOf<String, Ruta>()
         lateinit var rutaSeleccionada: Ruta
+        val walkingList = mutableMapOf<String, MutableList<PolylineOptions>>()
     }
 
     private lateinit var mMap: GoogleMap
@@ -146,7 +151,7 @@ class ChoiceActivity : AppCompatActivity(), OnMapReadyCallback {
 
     private fun traceAllRoutes() {
         traceRoute("walking", "Caminando", origin, destination)
-        traceRoute("driving", "Automovil", origin, destination)
+        //traceRoute("driving", "Automovil", origin, destination)
         for (colectivo in MapActivity.recorridos){
             grafo = Grafo()
             paradas = initParadas(colectivo.value.getParadas())
@@ -155,14 +160,16 @@ class ChoiceActivity : AppCompatActivity(), OnMapReadyCallback {
             val routeBetween = bestRoute.first
             val busDistance = bestRoute.second
             if (routeBetween!=null) {
+                val linea = colectivo.key.toString()
+                drawWalking(origin, routeBetween.start.latLng, linea)
+                drawWalking(routeBetween.end.latLng, destination, linea)
                 Log.i("print","Linea: ${colectivo.key}, P1: ${routeBetween.start.id}, P2: ${routeBetween.end.id}")
                 val segment = getSegmentInPolyline(routeBetween.start.latLng,routeBetween.end.latLng,colectivo.value.getRecorrido().points)
                 val polylineOptions = PolylineOptions()
                     .addAll(segment)
                     .width(10f)
-                    .color(Color.BLUE)
+                    .color(colectivo.value.getColor())
                 // Guardar la ruta y notificar que se ha actualizado el item
-                val linea = colectivo.key.toString()
                 val ruta = Ruta("${routeBetween.duration.toInt()} mins","${(routeBetween.distance*10).toInt()/10.0} km",polylineOptions,linea,busDistance,grafo.getListParadas(routeBetween.start,routeBetween.end))
                 rutasList[linea] = ruta
                 rutasSetup(linea)
@@ -189,11 +196,14 @@ class ChoiceActivity : AppCompatActivity(), OnMapReadyCallback {
                 var duration = leg.getJSONObject("duration").getString("text")
                 val distance = leg.getJSONObject("distance").getString("text")
 
+                val pattern: List<PatternItem> = listOf(Dash(20f), Gap(10f)) // Segmento de 20px y espacio de 10px
+
                 // Decodificar los puntos en una lista de LatLng
                 val polylineOptions = PolylineOptions()
                     .addAll(PolyUtil.decode(points))
                     .width(10f)
-                    .color(Color.BLUE)
+                    .color(Color.GRAY)
+                    .pattern(pattern) // Hace la línea punteada
 
                 if(duration.contains("hour")){
                     val hours = duration.split(" ")[0].toInt()
@@ -250,7 +260,7 @@ class ChoiceActivity : AppCompatActivity(), OnMapReadyCallback {
 
     private fun rutasSetup(item: String) {
         rutas.add(item)
-        if(rutas.containsAll(listOf("Caminando","500","501","502","503","504","505","Automovil"))) {
+        if(rutas.containsAll(listOf("Caminando","500","501","502","503","504","505"))) {
             val listaPulida = mutableListOf<String>()
             for(s in rutas) {
                 if(s.startsWith("5")) {
@@ -264,18 +274,8 @@ class ChoiceActivity : AppCompatActivity(), OnMapReadyCallback {
                 rvAdapter(listaOrdenada, R.layout.item_rutas, object : OnItemClickListener {
                     override fun onItemClickListener(item: String) {
                         rutasList[item]?.let {
-                            Funciones.drawRoute(mMap, origin, destination, it.getPoints())
                             rutaSeleccionada = it
-                            for (latLng in rutaSeleccionada.getParadas()) {
-                                mMap.addCircle(
-                                    CircleOptions()
-                                        .center(latLng)
-                                        .radius(15.0) // Ajusta el radio según sea necesario
-                                        .strokeColor(Color.BLUE)
-                                        .strokeWidth(2F)
-                                        .fillColor(Color.WHITE) // Color del círculo
-                                )
-                            }
+                            Funciones.drawRoute(mMap, origin, destination, rutaSeleccionada.getPoints())
                         }
                     }
                 }) { view -> rvRouteViewHolder(view) }
@@ -285,6 +285,41 @@ class ChoiceActivity : AppCompatActivity(), OnMapReadyCallback {
             // Forzar click en la opcion por defecto
             rvRutas.post { rvRutas.findViewHolderForAdapterPosition(0)?.itemView?.performClick() }
         }
+    }
+
+    private fun drawWalking(ori: LatLng, dest: LatLng, linea: String){
+        val googleMapsKey = getString(R.string.google_maps_key)
+        val url = "https://maps.googleapis.com/maps/api/directions/json?origin=${ori.latitude},${ori.longitude}&destination=${dest.latitude},${dest.longitude}&mode=walking&key=$googleMapsKey"
+
+        // Usar Volley para hacer la solicitud
+        val directionsRequest = StringRequest(Request.Method.GET, url, { response ->
+            // Parsear la respuesta JSON
+            val jsonResponse = JSONObject(response)
+            val routes = jsonResponse.getJSONArray("routes")
+            if (routes.length() > 0) {
+                val route = routes.getJSONObject(0)
+                val overviewPolyline = route.getJSONObject("overview_polyline")
+                val points = overviewPolyline.getString("points")
+
+                val pattern: List<PatternItem> = listOf(Dash(20f), Gap(10f)) // Segmento de 20px y espacio de 10px
+
+                // Decodificar los puntos en una lista de LatLng
+                val polylineOptions = PolylineOptions()
+                    .addAll(PolyUtil.decode(points))
+                    .width(10f)
+                    .color(Color.GRAY)
+                    .pattern(pattern) // Hace la línea punteada
+
+                if((walkingList[linea] == null) or (walkingList[linea]?.size == 2))
+                    walkingList[linea] = mutableListOf()
+                walkingList[linea]?.add(polylineOptions)
+            }
+        }, { error ->
+            Log.e("Error", "Error fetching directions: ${error.message}")
+        })
+
+        // Añadir la solicitud a la cola de Volley
+        Volley.newRequestQueue(this).add(directionsRequest)
     }
 
     private fun confirmListener() {

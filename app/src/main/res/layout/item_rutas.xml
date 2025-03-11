@@ -48,14 +48,6 @@
             android:gravity="end">
 
             <TextView
-                android:id="@+id/rvTime"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                tools:text="6 mins"
-                android:textColor="@color/white"
-                android:textSize="16sp" />
-
-            <TextView
                 android:id="@+id/rvDistance"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"

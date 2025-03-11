@@ -12,6 +12,7 @@ import android.widget.PopupMenu
 import android.widget.Spinner
 import android.widget.TextView
 import android.Manifest
+import android.annotation.SuppressLint
 import android.graphics.Color
 import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
@@ -44,6 +45,22 @@ import com.nmp.BusNow.classes.Tandil
 import com.android.volley.Request
 import com.android.volley.toolbox.JsonObjectRequest
 import com.android.volley.toolbox.Volley
+import android.app.AlertDialog
+import android.text.Spannable
+import android.text.SpannableString
+import android.text.style.ForegroundColorSpan
+import android.view.LayoutInflater
+import android.widget.Button
+import android.widget.EditText
+import android.widget.LinearLayout
+import com.google.android.libraries.places.api.Places
+import com.google.android.libraries.places.api.model.AutocompleteSessionToken
+import com.google.android.libraries.places.api.net.FetchPlaceRequest
+import com.google.android.libraries.places.api.net.FindAutocompletePredictionsRequest
+import com.google.android.libraries.places.api.net.PlacesClient
+import com.google.firebase.auth.FirebaseAuth
+import com.nmp.BusNow.classes.ColorSpinnerAdapter
+import org.json.JSONArray
 import org.json.JSONObject
 
 class MapActivity : AppCompatActivity(), OnMapReadyCallback {
@@ -70,18 +87,21 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback {
     private lateinit var searchText: TextView
     private lateinit var remove: ImageButton
     private lateinit var btnSeguimiento: TextView
+    private lateinit var btnPredict: TextView
+    private var btnPredictActive: Boolean = false
     private var latitude: Double = -1.0
     private var longitude: Double = -1.0
     private var address: String? = null
     private lateinit var lineaAnterior: String
-    private val colectivos = arrayOf(
-        "-",
-        "🟡500",
-        "🔴501",
-        "⚪502",
-        "🔵503",
-        "🟢504",
-        "🟤505"
+    private lateinit var placesClient: PlacesClient
+    private val colectivos = listOf(
+        Pair("-", Color.WHITE),
+        Pair("500", Color.YELLOW),
+        Pair("501", Color.RED),
+        Pair("502", Color.WHITE),
+        Pair("503", Color.BLUE),
+        Pair("504", Color.GREEN),
+        Pair("505", Color.rgb(139,69,19)) // Marrón
     )
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -115,8 +135,7 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback {
 
         // Inicializa el Spinner de opciones de colectivos
         spinner = findViewById(R.id.spinner)
-        val adapter = ArrayAdapter(this,android.R.layout.simple_spinner_item,colectivos)
-        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        val adapter = ColorSpinnerAdapter(this, colectivos)
         spinner.adapter = adapter
 
         // Inicializa el boton de opciones
@@ -141,6 +160,13 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback {
         // Inicializa boton para informar que subio o bajo del colectivo
         btnSeguimiento = findViewById(R.id.seguimiento)
         btnSeguimiento.text = buildString { append("SUBÍ AL COLECTIVO") }
+
+        // Inicializa boton para ir a la interfaz de prediccion
+        btnPredict = findViewById(R.id.predict)
+
+        // Inicializa Google Places
+        if (!Places.isInitialized()) { Places.initialize(applicationContext, getString(R.string.google_maps_key)) }
+        placesClient = Places.createClient(this)
     }
 
     private fun initListeners() {
@@ -221,18 +247,18 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback {
         // Maneja las selecciones del Spinner
         spinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>,view: View?,position: Int,id: Long) {
+                btnPredict.visibility = View.GONE
+                btnPredictActive = false
                 if (position >= 1) { // Verifica que la opción seleccionada no sea la inicial
                     // Limpiar pantalla
                     mMap.clear()
                     colectivoMarkers.clear()
                     removeDirection()
                     // Dibuja la ruta seleccionada
-                    val linea = colectivos[position].substring((colectivos[position].lastIndex)-2)
+                    val linea = colectivos[position].first
                     val colectivo = recorridos[linea.toLong()]
                     if (colectivo != null) {
                         mMap.addPolyline(colectivo.getRecorrido())
-                        Log.i("print","Linea: ${linea}")
-                        var cont = 1
                         for (latLng in colectivo.getParadas()) {
                             mMap.addCircle(
                                 CircleOptions()
@@ -242,8 +268,6 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback {
                                     .strokeWidth(2F)
                                     .fillColor(Color.WHITE) // Color del círculo
                             )
-                            Log.i("print","Parada${cont}: ${latLng}")
-                            cont++
                         }
                     }
                     spinnerActive = true
@@ -269,24 +293,37 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback {
         options.setOnClickListener {
             val popupMenu = PopupMenu(this, options)
             popupMenu.menuInflater.inflate(R.menu.options_menu, popupMenu.menu)
+
+            val auth = FirebaseAuth.getInstance()
+            val usuario = auth.currentUser
+
+            // Modificar dinámicamente el texto de la opción 1
+            val opt1 = popupMenu.menu.findItem(R.id.option_1)
+            opt1.title = if (usuario != null) "Cerrar sesión" else "Iniciar sesión"
+
             popupMenu.setOnMenuItemClickListener { menuItem ->
                 when (menuItem.itemId) {
                     R.id.option_1 -> {
                         // Acción para la opción 1
-                        predictRoute(500, "bus1")
+                        if (usuario != null) {
+                            // Hay un usuario logueado
+                            auth.signOut()
+                            Toast.makeText(this, "Sesión cerrada: ${usuario.email}", Toast.LENGTH_SHORT).show()
+                        } else {
+                            // No hay sesión activa
+                            mostrarLoginDialog()
+                        }
                         true
                     }
                     R.id.option_2 -> {
                         // Acción para la opción 2
-                        val intent = Intent(this,PredictActivity::class.java).apply {
-                            putExtra("linea", 500)
-                            putExtra("bus_id", "bus1")
+                        if (usuario != null) {
+                            // Hay un usuario logueado
+                            mostrarFavoritosDialog()
+                        } else {
+                            // No hay sesión activa
+                            Toast.makeText(this, "Debes iniciar sesion para guardar preferencias", Toast.LENGTH_SHORT).show()
                         }
-                        startActivity(intent)
-                        true
-                    }
-                    R.id.option_3 -> {
-                        // Acción para la opción 3
                         true
                     }
                     else -> false
@@ -406,6 +443,8 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback {
 
                         // Guardar los datos procesados
                         recorridos[linea] = Colectivo(drawRoute(listPuntos, colorInt), listParadas, colorInt)
+
+                        Log.i("print", "Recorridos cargados correctamente")
                     }
                 } else {
                     Log.e("print", "Respuesta inesperada del servidor")
@@ -455,7 +494,7 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback {
                     for (busSnapshot in snapshot.children) {
                         val busId = busSnapshot.key // ID del colectivo (e.g. "bus1", "bus2")
                         val lat = busSnapshot.child("lat").getValue(Double::class.java) ?: 0.0
-                        val lon = busSnapshot.child("lon").getValue(Double::class.java) ?: 0.0
+                        val lon = busSnapshot.child("lng").getValue(Double::class.java) ?: 0.0
                         val newLocation = LatLng(lat, lon)
 
                         // Verifica si ya existe un marcador para este colectivo
@@ -467,12 +506,16 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback {
                             val marker = mMap.addMarker(
                                 MarkerOptions()
                                     .position(newLocation)
-                                    .title("Colectivo $busId - Línea $linea")
+                                    .title("Línea $linea")
+                                    .snippet("ID: $busId")
                                     .icon(recorridos[linea.toLong()]?.getColor()
                                         ?.let { Funciones.createMarkerBitmap(it,this@MapActivity) }
                                         ?.let { BitmapDescriptorFactory.fromBitmap(it) })
                             )
                             busId?.let { colectivoMarkers[it] = marker!! }
+
+                            // Asociar el ID del colectivo al marcador
+                            marker?.tag = busId
                         }
                     }
                 }
@@ -485,52 +528,298 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback {
 
         // Añadir el listener a la referencia de la base de datos
         database.child("ubicaciones").child(linea).addValueEventListener(ubicacionListener!!)
+
+        // Agregar listener para detectar clics en los marcadores
+        setupMarkerClickListener(linea.toLong())
     }
 
-    private fun predictRoute(linea: Int, id: String) {
-        val url = "http://10.0.2.2:8000/predict"
+    @SuppressLint("PotentialBehaviorOverride")
+    private fun setupMarkerClickListener(linea: Long) {
+        mMap.setOnMarkerClickListener { marker ->
+            if (btnPredictActive) {
+                marker.hideInfoWindow() // Oculta la info si ya está abierta
+                btnPredict.visibility = View.GONE
+                btnPredictActive = false
+            } else {
+                marker.showInfoWindow() // La muestra si estaba cerrada
+                val busId = marker.tag as? String
+                if (busId != null) {
+                    val intent = Intent(this,PredictActivity::class.java).apply {
+                        putExtra("linea", linea)
+                        putExtra("bus_id", busId)
+                    }
+                    btnPredict.visibility = View.VISIBLE
+                    btnPredictActive = true
+                    btnPredict.setOnClickListener {
+                        startActivity(intent)
+                    }
+                }
+            }
+            true
+        }
+    }
 
-        // Crear el objeto JSON para enviar
-        val jsonBody = JSONObject()
-        jsonBody.put("linea", linea)
-        jsonBody.put("id", id)
+    private fun mostrarLoginDialog() {
+        val auth = FirebaseAuth.getInstance()
 
-        Log.i("print",jsonBody.toString())
+        // Inflar el diseño del diálogo
+        val inflater = LayoutInflater.from(this)
+        val dialogView = inflater.inflate(R.layout.dialog_login, null)
 
-        val request = JsonObjectRequest(
-            Request.Method.POST, url, jsonBody,
+        // Obtener referencias a los campos de entrada
+        val emailEditText = dialogView.findViewById<EditText>(R.id.editTextEmail)
+        val passwordEditText = dialogView.findViewById<EditText>(R.id.editTextPassword)
+
+        // Crear el diálogo
+        val dialog = AlertDialog.Builder(this)
+            .setView(dialogView)
+            .setTitle("Iniciar sesión")
+            .setPositiveButton("Iniciar sesión") { _, _ ->
+                val email = emailEditText.text.toString().trim()
+                val password = passwordEditText.text.toString().trim()
+
+                if (email.isNotEmpty() && password.isNotEmpty()) {
+                    auth.signInWithEmailAndPassword(email, password)
+                        .addOnCompleteListener { task ->
+                            if (task.isSuccessful) {
+                                Toast.makeText(this, "Inicio de sesión exitoso", Toast.LENGTH_SHORT).show()
+                            } else {
+                                Toast.makeText(this, "Error: ${task.exception?.message}", Toast.LENGTH_LONG).show()
+                            }
+                        }
+                } else {
+                    Toast.makeText(this, "Completa todos los campos", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("Cancelar", null)
+            .setNeutralButton("Registrarse") { _, _ ->
+                val email = emailEditText.text.toString().trim()
+                val password = passwordEditText.text.toString().trim()
+
+                if (email.isNotEmpty() && password.isNotEmpty()) {
+                    auth.createUserWithEmailAndPassword(email, password)
+                        .addOnCompleteListener { task ->
+                            if (task.isSuccessful) {
+                                Toast.makeText(this, "Registro exitoso", Toast.LENGTH_SHORT).show()
+                            } else {
+                                Toast.makeText(this, "Error: ${task.exception?.message}", Toast.LENGTH_LONG).show()
+                            }
+                        }
+                } else {
+                    Toast.makeText(this, "Completa todos los campos", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .create()
+
+        dialog.show()
+    }
+
+    @SuppressLint("InflateParams")
+    private fun mostrarFavoritosDialog() {
+        val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_favoritos, null)
+        val builder = AlertDialog.Builder(this)
+            .setView(dialogView)
+            .setTitle("Guardar Direcciones Favoritas")
+
+        val alertDialog = builder.create()
+
+        val casaEditText = dialogView.findViewById<EditText>(R.id.casaEditText)
+        val trabajoEditText = dialogView.findViewById<EditText>(R.id.trabajoEditText)
+        val listaDirecciones = dialogView.findViewById<LinearLayout>(R.id.listaDirecciones)
+        val agregarDireccionBtn = dialogView.findViewById<Button>(R.id.agregarDireccionBtn)
+        val aplicarBtn = dialogView.findViewById<Button>(R.id.aplicarBtn)
+        val cancelarBtn = dialogView.findViewById<Button>(R.id.cancelarBtn)
+
+        val direccionesExtras = mutableListOf<View>()
+
+        val userId = FirebaseAuth.getInstance().currentUser?.uid ?: return
+        val url = "http://10.0.2.2:8000/get_favoritos/$userId"
+
+        val request = JsonObjectRequest(Request.Method.GET, url, null,
             { response ->
                 try {
                     if (response.has("error")) {
                         val errorMessage = response.getString("error")
                         Log.e("print", "Error del servidor: $errorMessage")
-                    } else if (response.has("prediction")) {
-                        val coordinatesArray = response.getJSONArray("prediction")
-                        val coordinatesList = mutableListOf<Pair<Double, Double>>()
+                    } else if (response.has("favoritos")) {
+                        val favoritos = response.getJSONObject("favoritos")
 
-                        for (i in 0 until coordinatesArray.length()) {
-                            val coord = coordinatesArray.getJSONArray(i)
-                            val lat = coord.getDouble(0)
-                            val lng = coord.getDouble(1)
-                            coordinatesList.add(Pair(lat, lng))
+                        for (key in favoritos.keys()) {
+                            val favorito = favoritos.getJSONObject(key)
+                            val direccion = favorito.getString("direccion")
+
+                            when (key) {
+                                "Casa" -> casaEditText.setText(direccion)
+                                "Trabajo" -> trabajoEditText.setText(direccion)
+                                else -> agregarDireccionDinamica(listaDirecciones, direccionesExtras, key, direccion)
+                            }
                         }
 
-                        Log.i("print", "Coordenadas recibidas: $coordinatesList")
+                        Log.i("print", "Respuesta del servidor: ${favoritos}")
+                        alertDialog.show()
                     } else {
                         Log.e("print", "Respuesta inesperada del servidor")
                     }
-
                 } catch (e: Exception) {
                     Log.e("print", "Error procesando la respuesta: ${e.message}")
                 }
             },
             { error ->
                 Log.e("print", "Error: ${error.message}")
-            }
-        )
+            })
 
-        // Agregar la solicitud a la cola
+        agregarDireccionBtn.setOnClickListener {
+            agregarDireccionDinamica(listaDirecciones, direccionesExtras, "", "")
+        }
+
+        aplicarBtn.setOnClickListener {
+            val favoritosList = mutableListOf<Map<String, Any>>()
+            val direccionesPendientes = mutableListOf<Pair<String, String>>() // Lista de direcciones a procesar
+
+            // Agregar direcciones a la lista de pendientes
+            if (casaEditText.text.isNotEmpty()) {
+                direccionesPendientes.add(Pair("Casa", casaEditText.text.toString()))
+            }
+
+            if (trabajoEditText.text.isNotEmpty()) {
+                direccionesPendientes.add(Pair("Trabajo", trabajoEditText.text.toString()))
+            }
+
+            for (view in direccionesExtras) {
+                val nombre = view.findViewById<EditText>(R.id.nombreDireccionEditText).text.toString()
+                val direccion = view.findViewById<EditText>(R.id.direccionEditText).text.toString()
+
+                if (nombre.isNotEmpty() && direccion.isNotEmpty()) {
+                    direccionesPendientes.add(Pair(nombre, direccion))
+                }
+            }
+
+            // Verificar si hay direcciones a procesar
+            if (direccionesPendientes.isEmpty()) {
+                alertDialog.dismiss()
+            } else {
+
+                var procesadas = 0 // Contador de direcciones procesadas
+                var error = false
+
+                // Obtener coordenadas para cada dirección
+                for ((nombre, direccion) in direccionesPendientes) {
+                    getLatLng(direccion) { latLng ->
+                        val favorito = mapOf(
+                            "nombre" to nombre,
+                            "direccion" to direccion,
+                            "lat" to (latLng?.latitude ?: 0.0),
+                            "lng" to (latLng?.longitude ?: 0.0)
+                        )
+                        favoritosList.add(favorito)
+
+                        if (latLng == null) {
+                           error = true
+                        }
+
+                        procesadas++ // Incrementar contador
+
+                        // Si todas las direcciones han sido procesadas, guardar en el servidor
+                        if (procesadas == direccionesPendientes.size) {
+                            if (error) {
+                                Toast.makeText(this, "No ingresó una dirección valida (calle y altura)", Toast.LENGTH_SHORT).show()
+                            } else {
+                                guardarFavoritosEnServidor(userId, favoritosList)
+                            }
+                            alertDialog.dismiss()
+                        }
+                    }
+                }
+            }
+        }
+
+
+        cancelarBtn.setOnClickListener {
+            alertDialog.dismiss()
+        }
+
+        Volley.newRequestQueue(this).add(request)
+    }
+
+    private fun agregarDireccionDinamica(listaDirecciones: LinearLayout, direccionesExtras: MutableList<View>, nombre: String, direccion: String) {
+        val nuevaDireccionView = LayoutInflater.from(listaDirecciones.context).inflate(R.layout.item_direccion, null)
+        val nombreEditText = nuevaDireccionView.findViewById<EditText>(R.id.nombreDireccionEditText)
+        val direccionEditText = nuevaDireccionView.findViewById<EditText>(R.id.direccionEditText)
+        val eliminarBtn = nuevaDireccionView.findViewById<ImageButton>(R.id.eliminarDireccionBtn) // Botón de eliminar
+
+        nombreEditText.setText(nombre)
+        direccionEditText.setText(direccion)
+
+        eliminarBtn.setOnClickListener {
+            listaDirecciones.removeView(nuevaDireccionView)
+            direccionesExtras.remove(nuevaDireccionView)
+        }
+
+        listaDirecciones.addView(nuevaDireccionView)
+        direccionesExtras.add(nuevaDireccionView)
+    }
+
+
+    private fun guardarFavoritosEnServidor(userId: String, favoritosList: List<Map<String, Any>>) {
+        val url = "http://10.0.2.2:8000/guardar_favoritos"
+        val jsonBody = JSONObject().apply {
+            put("user_id", userId)
+            put("lista_favoritos", JSONArray(favoritosList))
+        }
+
+        val request = JsonObjectRequest(Request.Method.POST, url, jsonBody,
+            { response ->
+                Toast.makeText(this, "Favoritos guardados!", Toast.LENGTH_SHORT).show()
+            },
+            { error ->
+                Toast.makeText(this, "Error guardando favoritos: ${error.message}", Toast.LENGTH_SHORT).show()
+            })
+
         val queue = Volley.newRequestQueue(this)
         queue.add(request)
     }
+
+    private fun getLatLng(query: String, callback: (LatLng?) -> Unit) {
+        val token = AutocompleteSessionToken.newInstance()
+
+        val request = FindAutocompletePredictionsRequest.builder()
+            .setLocationBias(Tandil.locationBias())  // Limitar la búsqueda a Tandil
+            .setSessionToken(token)
+            .setQuery(query)
+            .build()
+
+        placesClient.findAutocompletePredictions(request)
+            .addOnSuccessListener { response ->
+                if (response.autocompletePredictions.isNotEmpty()) {
+                    val prediction = response.autocompletePredictions[0]
+                    val placeId = prediction.placeId
+                    val placeFields = listOf(com.google.android.libraries.places.api.model.Place.Field.LAT_LNG)
+
+                    val placeRequest = FetchPlaceRequest.builder(placeId, placeFields).build()
+                    placesClient.fetchPlace(placeRequest)
+                        .addOnSuccessListener { placeResponse ->
+                            val latLng = placeResponse.place.latLng
+                            if (latLng != null && Tandil.isWithinBounds(latLng)) {
+                                Log.i("print", "La ubicación de ${query} es: ${latLng}")
+                                callback(latLng)
+                            } else {
+                                Log.e("print", "La ubicación de ${query} no fue encontrada")
+                                callback(null) // Si la ubicación no está dentro de Tandil
+                            }
+                        }
+                        .addOnFailureListener {
+                            Log.e("print", "Hubo un error en la busqueda de ${query}")
+                            callback(null) // Si hay un error en la búsqueda
+                        }
+                } else {
+                    Log.e("print", "No hubo predicciones para la direccion: ${query}")
+                    callback(null) // Si no hay predicciones
+                }
+            }
+            .addOnFailureListener {
+                Log.e("print", "Hubo un error en la prediccion de la direccion: ${query}")
+                callback(null) // Si hay un error en la predicción
+            }
+    }
+
 }
