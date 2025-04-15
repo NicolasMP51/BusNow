@@ -204,7 +204,7 @@ class Funciones {
                             updateBusLocation(latitude, longitude, context)
                         } else {
                             // La ubicación no está en el recorrido
-                            Log.i("print", "Ubicación fuera del recorrido")
+                            Toast.makeText(context, "Ubicación fuera del recorrido", Toast.LENGTH_SHORT).show()
                         }
                     }
                 }
@@ -232,7 +232,7 @@ class Funciones {
             val distance = distanciaASegmento(location,polyline.points[index],polyline.points[index+1])
 
             // Verificar si la ubicación está en el recorrido con una tolerancia de 20 metros
-            return (distance<2000)
+            return (distance<20)
         }
 
         private fun updateBusLocation(latitude: Double, longitude: Double, context: Context) {

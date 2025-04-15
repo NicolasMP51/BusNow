@@ -53,6 +53,7 @@ import android.view.LayoutInflater
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
+import com.google.android.gms.location.Priority
 import com.google.android.libraries.places.api.Places
 import com.google.android.libraries.places.api.model.AutocompleteSessionToken
 import com.google.android.libraries.places.api.net.FetchPlaceRequest
@@ -193,7 +194,7 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback {
         mMap.setLatLngBoundsForCameraTarget(Tandil.bounds())
 
         try {
-            fusedLocationClient.lastLocation.addOnSuccessListener { location ->
+            fusedLocationClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null).addOnSuccessListener { location ->
                 if (location != null) {
                     currentLatLng = LatLng(location.latitude, location.longitude)
                     currentAddress = "Tu ubicación actual"
